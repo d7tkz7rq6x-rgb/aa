@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>圈圈小圆点</title>
+  <style>
+    /* ================ 基础布局 ================ */
+    :root{
+      --bg:#f7fbff; /* 淡蓝背景 */
+      --panel:#ffffff; /* 控件面板白色 */
+      --accent:#1e90ff; /* 主蓝色 */
+      --green-start:#2ecc71;
+      --green-end:#1abc9c;
+      --shadow: 0 6px 18px rgba(20,30,60,0.12);
+      --radius:12px;
+      --control-size:44px;
+    }
+    html,body{height:100%;margin:0;background:var(--bg);font-family:system-ui, -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial}
+    .app{
+      position:fixed;inset:0;display:flex;align-items:stretch;justify-content:center;overflow:hidden;
+    }
+    canvas{
+      display:block; width:100%; height:100%; cursor: crosshair; /* 十字准星 */
+      background: linear-gradient(180deg, rgba(255,255,255,0.6), rgba(240,250,255,0.9));
+      touch-action: none; /* 让触摸绘制顺畅 */
+    }
+
+    /* ================ 顶部控件 & 计数器 ================ */
+    .top-left-counter{
+      position:absolute;left:18px;top:18px;padding:8px 12px;border-radius:14px;background:var(--panel);box-shadow:var(--shadow);display:flex;align-items:center;gap:10px;
+      font-weight:600;color:var(--accent);backdrop-filter: blur(4px);
+    }
+    .top-left-counter .dot{
+      width:12px;height:12px;border-radius:50%;background:linear-gradient(180deg,var(--green-start),var(--green-end));box-shadow:0 2px 6px rgba(0,0,0,0.12);
+    }
+
+    .top-right-controls{
+      position:absolute;right:18px;top:18px;display:flex;gap:10px;align-items:center;
+    }
+    .ctrl-btn{
+      width:var(--control-size);height:var(--control-size);display:grid;place-items:center;border-radius:10px;background:var(--panel);box-shadow:var(--shadow);border:none;cursor:pointer;
+    }
+    .ctrl-btn:active{transform:translateY(1px)}
+
+    /* ================ 设置面板 ================ */
+    .settings-panel{
+      position:fixed;right:18px;top:78px;width:320px;max-width:90vw;background:var(--panel);border-radius:14px;padding:16px;box-shadow:var(--shadow);transform-origin:top right;opacity:0;pointer-events:none;transform:translateY(-8px) scale(0.98);
+      transition:all .22s cubic-bezier(.2,.9,.25,1);
+    }
+    .settings-panel.open{opacity:1;pointer-events:auto;transform:translateY(0) scale(1)}
+    .settings-panel h3{margin:0 0 8px 0;color:#0b66b2}
+    .settings-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+    .kbd{
+      display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:8px;background:linear-gradient(#fff,#fbfdff);border-radius:10px;
+    }
+    .key{min-height:44px;border-radius:8px;display:grid;place-items:center;font-size:18px;font-weight:600;background:linear-gradient(180deg,#f8faff,#eef8ff);box-shadow:0 4px 10px rgba(20,30,60,0.06);cursor:pointer;user-select:none}
+    .key.wide{grid-column:span 2}
+    .small-muted{font-size:12px;color:#6b7b89}
+
+    /* ================ 动画 (淡入) ================ */
+    @keyframes fadeInPanel{from{opacity:0;transform:translateY(-10px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
+    .settings-panel.open{animation:fadeInPanel .18s ease-out}
+
+    /* ================ 响应式 ================ */
+    @media (max-width:480px){
+      .settings-panel{width:92vw;left:4vw;right:4vw;top:auto;bottom:18px}
+      .top-left-counter{left:10px;top:10px}
+      .top-right-controls{right:10px;top:10px}
+    }
+
+    /* 小提示文字 */
+    .hint{font-size:12px;color:#6b7b89}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <canvas id="stage"></canvas>
+
+    <!-- 左上角计数 -->
+    <div class="top-left-counter" id="counter">
+      <div class="dot"></div>
+      <div>
+        已选 <span id="selectedCount">0</span>
+      </div>
+    </div>
+
+    <!-- 右上角控件 -->
+    <div class="top-right-controls">
+      <button class="ctrl-btn" id="regenBtn" title="重新生成">
+        <!-- 刷新SVG -->
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21 12a9 9 0 10-3 6.5" stroke="#0b66b2" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="ctrl-btn" id="settingsBtn" title="设置">
+        <!-- 齿轮SVG -->
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 15.5a3.5 3.5 0 100-7 3.5 3.5 0 000 7z" stroke="#0b66b2" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06A2 2 0 117.8 2.5l.06.06a1.65 1.65 0 001.82.33h.09A1.65 1.65 0 0011 2.5V2a2 2 0 114 0v.09a1.65 1.65 0 001 1.51c.39.18.8.08 1.14-.26l.06-.06a2 2 0 112.83 2.83l-.06.06c-.34.34-.44.75-.26 1.14.46.9 1.37 1.14 1.51 1z" stroke="#0b66b2" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+
+    <!-- 设置面板 -->
+    <div class="settings-panel" id="settingsPanel" aria-hidden="true">
+      <h3>设置 - 圆点数量</h3>
+      <div class="settings-row">
+        <div>
+          <div class="small-muted">当前数量</div>
+          <div id="currentNumber" style="font-weight:700;font-size:20px;color:var(--accent)">350</div>
+        </div>
+        <div style="text-align:right">
+          <div class="small-muted">说明</div>
+          <div class="hint">使用虚拟键盘输入数量（最大2000）</div>
+        </div>
+      </div>
+
+      <!-- 虚拟数字键盘 -->
+      <div class="kbd" id="kbd">
+        <div class="key">7</div>
+        <div class="key">8</div>
+        <div class="key">9</div>
+        <div class="key">4</div>
+        <div class="key">5</div>
+        <div class="key">6</div>
+        <div class="key">1</div>
+        <div class="key">2</div>
+        <div class="key">3</div>
+        <div class="key">0</div>
+        <div class="key wide" id="clearKey">清除</div>
+        <div class="key" id="okKey">确定</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  /*
+   * 圈圈小圆点 - 单文件实现说明：
+   * - 使用Canvas API绘制圆点与用户绘制的闭合路径（多边形）
+   * - 使用点-in-多边形算法判断圆点是否被圈中
+   * - 支持鼠标与触摸事件，支持响应式与高 DPR 显示
+   */
+
+  (function(){
+    // ========== 配置与状态 ==========
+    const DEFAULT_COUNT = 350;
+    const MAX_COUNT = 2000;
+    const DOT_RADIUS = 6; // 逻辑像素
+    const MARGIN = 12; // 边距，防止溢出
+
+    const canvas = document.getElementById('stage');
+    const ctx = canvas.getContext('2d');
+    const counterEl = document.getElementById('selectedCount');
+    const currentNumberEl = document.getElementById('currentNumber');
+
+    const settingsBtn = document.getElementById('settingsBtn');
+    const settingsPanel = document.getElementById('settingsPanel');
+    const regenBtn = document.getElementById('regenBtn');
+
+    const kbd = document.getElementById('kbd');
+    const clearKey = document.getElementById('clearKey');
+    const okKey = document.getElementById('okKey');
+
+    let dotCount = DEFAULT_COUNT;
+    let dots = []; // {x,y,r,selected}
+
+    // 绘制路径相关
+    let drawing = false;
+    let path = []; // [{x,y},...]
+    let needsRedraw = true;
+
+    // 设备像素比支持
+    function resizeCanvas(){
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      const w = Math.max(300, rect.width);
+      const h = Math.max(150, rect.height);
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+      canvas.style.width = w + 'px';
+      canvas.style.height = h + 'px';
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+      needsRedraw = true;
+    }
+
+    // 初始化样式尺寸
+    function initLayout(){
+      // 让 canvas 填满屏幕
+      canvas.style.width = '100%';
+      canvas.style.height = '100%';
+      resizeCanvas();
+    }
+
+    // 生成圆点，注意边界
+    function genDots(n){
+      dots = [];
+      const rect = canvas.getBoundingClientRect();
+      const w = rect.width;
+      const h = rect.height;
+      for(let i=0;i<n;i++){
+        // 随机位置，避免靠太近边界
+        const x = MARGIN + Math.random()*(w - MARGIN*2);
+        const y = MARGIN + Math.random()*(h - MARGIN*2);
+        dots.push({x,y,r:DOT_RADIUS,selected:false});
+      }
+      needsRedraw = true;
+    }
+
+    // 绘制函数
+    function draw(){
+      if(!needsRedraw) return;
+      needsRedraw = false;
+      const rect = canvas.getBoundingClientRect();
+      const w = rect.width;
+      const h = rect.height;
+
+      // 清空
+      ctx.clearRect(0,0,w,h);
+
+      // 绘制每个点
+      for(const p of dots){
+        drawDot(p);
+      }
+
+      // 如果在绘制或已有路径，绘制多边形路径
+      if(path.length>0){
+        ctx.lineWidth = 3;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = 'rgba(18,155,95,0.92)';
+        ctx.beginPath();
+        ctx.moveTo(path[0].x, path[0].y);
+        for(let i=1;i<path.length;i++) ctx.lineTo(path[i].x, path[i].y);
+        // 如果正在绘制，画到当前鼠标（path includes cur point)
+        if(drawing){
+          ctx.stroke();
+        }else{
+          // 如果闭合，画回起点并填充半透明绿色
+          ctx.closePath();
+          ctx.stroke();
+          ctx.fillStyle = 'rgba(46,204,113,0.06)';
+          ctx.fill();
+        }
+      }
+
+      // 更新计数器
+      const selected = dots.filter(d=>d.selected).length;
+      counterEl.textContent = selected;
+    }
+
+    // 绘制一个圆点，使用径向渐变，选中显示绿色渐变
+    function drawDot(p){
+      const {x,y,r,selected} = p;
+      const g = ctx.createRadialGradient(x - r*0.3, y - r*0.3, r*0.2, x, y, r);
+      if(selected){
+        g.addColorStop(0, '#b7f3d6');
+        g.addColorStop(1, '#2ecc71');
+      }else{
+        g.addColorStop(0, 'rgba(255,255,255,0.95)');
+        g.addColorStop(1, 'rgba(30,144,255,0.85)');
+      }
+      ctx.beginPath();
+      ctx.arc(x,y,r,0,Math.PI*2);
+      ctx.fillStyle = g;
+      ctx.fill();
+      // 细边描边
+      ctx.lineWidth = 0.8;
+      ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+      ctx.stroke();
+    }
+
+    // 点-in-多边形 (射线法) - 对每个圆点中心判断
+    function pointInPoly(point, poly){
+      // poly: [{x,y},...]
+      let inside = false;
+      for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+        const xi=poly[i].x, yi=poly[i].y;
+        const xj=poly[j].x, yj=poly[j].y;
+        const intersect = ((yi>point.y) !== (yj>point.y)) && (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi);
+        if(intersect) inside = !inside;
+      }
+      return inside;
+    }
+
+    // 根据当前闭合路径更新选择状态
+    function updateSelection(){
+      if(path.length<3) return;
+      // 使用点在多边形内判断
+      for(const d of dots){
+        d.selected = pointInPoly({x:d.x,y:d.y}, path);
+      }
+      needsRedraw = true;
+    }
+
+    // ========== 事件处理：鼠标 & 触摸 ==========
+    function getCanvasPoint(evt){
+      const rect = canvas.getBoundingClientRect();
+      let clientX, clientY;
+      if(evt.touches && evt.touches[0]){
+        clientX = evt.touches[0].clientX; clientY = evt.touches[0].clientY;
+      } else if(evt.changedTouches && evt.changedTouches[0]){
+        clientX = evt.changedTouches[0].clientX; clientY = evt.changedTouches[0].clientY;
+      } else {
+        clientX = evt.clientX; clientY = evt.clientY;
+      }
+      return {x: clientX - rect.left, y: clientY - rect.top};
+    }
+
+    // 开始绘制
+    function onPointerDown(e){
+      e.preventDefault();
+      drawing = true;
+      path = [];
+      const p = getCanvasPoint(e);
+      path.push(p);
+      needsRedraw = true;
+    }
+    // 移动
+    function onPointerMove(e){
+      if(!drawing) return;
+      e.preventDefault();
+      const p = getCanvasPoint(e);
+      // 只添加与最后一点距离超过阈值的点，避免路径太密
+      const last = path[path.length-1];
+      const dx = p.x - last.x, dy = p.y - last.y;
+      if(dx*dx + dy*dy > 9){
+        path.push(p);
+        needsRedraw = true;
+      }
+    }
+    // 停止绘制（尝试闭合）
+    function onPointerUp(e){
+      if(!drawing) return;
+      e.preventDefault();
+      drawing = false;
+      // 尝试闭合：当起点和终点足够接近时做闭合，否则自动闭合
+      if(path.length>=3){
+        // 简化：直接闭合为多边形
+        updateSelection();
+      }
+      needsRedraw = true;
+    }
+
+    // 为 canvas 添加事件监听，支持鼠标和触摸
+    function attachPointerHandlers(){
+      // 鼠标
+      canvas.addEventListener('mousedown', onPointerDown);
+      window.addEventListener('mousemove', onPointerMove);
+      window.addEventListener('mouseup', onPointerUp);
+
+      // 触摸
+      canvas.addEventListener('touchstart', onPointerDown, {passive:false});
+      window.addEventListener('touchmove', onPointerMove, {passive:false});
+      window.addEventListener('touchend', onPointerUp, {passive:false});
+
+      // 防止长按弹出菜单
+      canvas.addEventListener('contextmenu', (e)=>e.preventDefault());
+    }
+
+    // ========== 控件交互 ==========
+    settingsBtn.addEventListener('click', ()=>{
+      const open = settingsPanel.classList.toggle('open');
+      settingsPanel.setAttribute('aria-hidden', !open);
+    });
+
+    regenBtn.addEventListener('click', ()=>{
+      genDots(dotCount);
+    });
+
+    // 键盘输入处理
+    let inputBuffer = '';
+    currentNumberEl.textContent = dotCount;
+
+    kbd.addEventListener('click', (e)=>{
+      const t = e.target;
+      if(!t.classList.contains('key')) return;
+      const v = t.textContent.trim();
+      if(v === '清除'){
+        inputBuffer = '';
+        currentNumberEl.textContent = dotCount;
+      } else if(v === '确定'){
+        // 点击确定等于 okKey which will be handled below
+      } else {
+        if(inputBuffer.length >= 6) return; // 防止过长
+        inputBuffer += v;
+        const n = Math.min(MAX_COUNT, Math.max(1, parseInt(inputBuffer)));
+        currentNumberEl.textContent = n;
+      }
+    });
+
+    clearKey.addEventListener('click', ()=>{
+      inputBuffer = '';
+      currentNumberEl.textContent = dotCount;
+    });
+
+    okKey.addEventListener('click', ()=>{
+      let n = parseInt(currentNumberEl.textContent) || dotCount;
+      n = Math.max(1, Math.min(MAX_COUNT, n));
+      dotCount = n;
+      inputBuffer = '';
+      currentNumberEl.textContent = dotCount;
+      genDots(dotCount);
+      // 关闭面板
+      settingsPanel.classList.remove('open');
+      settingsPanel.setAttribute('aria-hidden', 'true');
+    });
+
+    // 监听窗口大小变化
+    window.addEventListener('resize', ()=>{ resizeCanvas(); genDots(dotCount); });
+
+    // ========== 初始化 ==========
+    initLayout();
+    attachPointerHandlers();
+    genDots(dotCount);
+
+    // 主循环：使用 rAF 更新绘制
+    function loop(){
+      draw();
+      requestAnimationFrame(loop);
+    }
+    loop();
+
+    // 给用户展示快速提示（可扩展）
+    console.log('圈圈小圆点 初始化完成 - 支持触摸与鼠标绘制，多边形点选。');
+
+    // 对外暴露（调试）
+    window._cz = {genDots, dots};
+
+  })();
+  </script>
+</body>
+</html>
